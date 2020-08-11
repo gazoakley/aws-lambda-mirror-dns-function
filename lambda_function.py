@@ -42,8 +42,8 @@ route53 = boto3.client('route53')
 # Function to create, update, delete records in Route 53
 def update_resource_record(zone_id, host_name, hosted_zone_name, rectype, changerec, ttl, action):
     if not (rectype == 'NS' and host_name == '@'):
-        print 'Updating as %s for %s record %s TTL %s in zone %s with %s ' % (
-            action, rectype, host_name, ttl, hosted_zone_name, changerec)
+        print('Updating as %s for %s record %s TTL %s in zone %s with %s ' % (
+            action, rectype, host_name, ttl, hosted_zone_name, changerec))
         if rectype != 'SOA':
             if host_name == '@':
                 host_name = ''
@@ -75,7 +75,7 @@ def update_resource_record(zone_id, host_name, hosted_zone_name, rectype, change
         try:  # Submit API request to Route 53
             route53.change_resource_record_sets(HostedZoneId=zone_id, ChangeBatch=dns_changes)
         except BaseException as e:
-            print e
+            print(e)
             sys.exit('ERROR: Unable to update zone %s' % hosted_zone_name)
         return True
 
@@ -153,7 +153,7 @@ def diff_zones(zone1, zone2, ignore_ttl):
                     if change and change not in differences:
                         differences.append(change)
                 elif record2.ttl != record1.ttl:
-                    print 'Ignoring TTL update for %s' % node
+                    print('Ignoring TTL update for %s' % node)
 
     return differences
 
@@ -170,16 +170,16 @@ def lambda_handler(event, context):
         else:
             ignore_ttl = False  # Update records even if the change is just the TTL
     except BaseException as e:
-        print 'Error in setting up the environment, exiting now (%s) ' % e
+        print('Error in setting up the environment, exiting now (%s) ' % e)
         sys.exit('ERROR: check JSON file is complete:', event)
 
     # Transfer the master zone file from the DNS server via AXFR
-    print 'Transferring zone %s from server %s ' % (domain_name, master_ip)
+    print('Transferring zone %s from server %s ' % (domain_name, master_ip))
     try:
         master_zone = dns.zone.from_xfr(dns.query.xfr(master_ip, domain_name))
     except BaseException as e:
-        print 'Problem transferring zone'
-        print e
+        print('Problem transferring zone')
+        print(e)
         sys.exit('ERROR: Unable to retrieve zone %s from %s' % (domain_name, master_ip))
 
     soa = master_zone.get_rdataset('@', 'SOA')
@@ -187,7 +187,7 @@ def lambda_handler(event, context):
 
     # Read the zone from Route 53 via API and populate into zone object
     vpc_zone = dns.zone.Zone(origin=domain_name)
-    print 'Getting VPC SOA serial from Route 53'  # Get the SOA from Route 53 by API to avoid getting stale records
+    print('Getting VPC SOA serial from Route 53') # Get the SOA from Route 53 by API to avoid getting stale records
     try:
         vpc_recordset = route53.list_resource_record_sets(HostedZoneId=route53_zone_id)['ResourceRecordSets']
         for record in vpc_recordset:
@@ -202,14 +202,14 @@ def lambda_handler(event, context):
                 rdata = dns.rdata.from_text(1, rdataset.rdtype, value['Value'].replace(domain_name + '.', ''))
                 rdataset.add(rdata, ttl=int(record['TTL']))
     except BaseException as e:
-        print e
+        print(e)
         sys.exit('ERROR: Unable to retrieve VPC Zone via API (%s)' % e)
 
     # Compare the master and VPC Route 53 zone file
     vpc_soa = vpc_zone.get_rdataset('@', 'SOA')
     vpc_serial = vpc_soa[0].serial
     if not (vpc_serial > serial):
-        print 'Comparing SOA serial %s with %s ' % (vpc_serial, serial)
+        print('Comparing SOA serial %s with %s ' % (vpc_serial, serial))
         differences = diff_zones(vpc_zone, master_zone, ignore_ttl)
 
         for host, rdtype, record, ttl, action in differences:
@@ -218,12 +218,11 @@ def lambda_handler(event, context):
                                        action)
 
         # Update the VPC SOA to reflect the version just processed
-        vpc_soa[0].serial = serial
+        soarecord = [vpc_soa[0].replace(serial = serial)]
         try:
-            soarecord = [str(vpc_soa[0])]
             update_resource_record(route53_zone_id, '', domain_name, 'SOA', soarecord, vpc_soa[0].minimum, 'UPSERT')
         except BaseException as e:
-            print e
+            print(e)
             sys.exit('ERROR: Failed to update SOA to %s on Route 53 VPC Zone' % str(serial))
     else:
         sys.exit('ERROR: Route 53 VPC serial %s for domain %s is greater than existing serial %s' % (str(vpc_serial), domain_name, str(serial)))

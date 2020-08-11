@@ -2,6 +2,7 @@
 dns/
 event.json
 *.zip
+dnspython-*
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
