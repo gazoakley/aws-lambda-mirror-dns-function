@@ -20,6 +20,8 @@
 # These imports are bundled local to the lambda function 
 import dns.query
 import dns.zone
+import dns.tsig
+import dns.tsigkeyring
 import lookup_rdtype
 from dns.rdataclass import *
 from dns.rdatatype import *
@@ -169,6 +171,13 @@ def lambda_handler(event, context):
             ignore_ttl = True  # Ignore TTL changes in records
         else:
             ignore_ttl = False  # Update records even if the change is just the TTL
+
+        keyring = None
+        keyalgo = None
+        if ('KeyName' in event) & ('KeySecret' in event):
+            keyring = dns.tsigkeyring.from_text({ event['KeyName']: event['KeySecret']})
+        if ('KeyAlgorithm' in event):
+            keyalgo = event['KeyAlgorithm']
     except BaseException as e:
         print('Error in setting up the environment, exiting now (%s) ' % e)
         sys.exit('ERROR: check JSON file is complete:', event)
@@ -176,7 +185,12 @@ def lambda_handler(event, context):
     # Transfer the master zone file from the DNS server via AXFR
     print('Transferring zone %s from server %s ' % (domain_name, master_ip))
     try:
-        master_zone = dns.zone.from_xfr(dns.query.xfr(master_ip, domain_name))
+        master_zone = dns.zone.from_xfr(dns.query.xfr(
+            master_ip, 
+            domain_name, 
+            keyring = keyring,
+            keyalgorithm = keyalgo,
+            ))
     except BaseException as e:
         print('Problem transferring zone')
         print(e)
