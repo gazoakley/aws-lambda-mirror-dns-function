@@ -232,15 +232,17 @@ def lambda_handler(event, context):
     # Read the zone from Route 53 via API and populate into zone object
     vpc_zone = dns.zone.Zone(origin=domain_name)
     log.info('Getting VPC SOA serial from Route 53') # Get the SOA from Route 53 by API to avoid getting stale records
+    name_re = re.compile(r'\.?{}?\.?$'.format(domain_name))
+
     try:
         vpc_recordset = get_all_records(route53_zone_id)
         for record in vpc_recordset:
             # Change the record name so that it doesn't have the domain name appended
-            recordname = record['Name'].replace(domain_name + '.', '')
+            recordname = name_re.sub('', record['Name'])
             if recordname == '':
                 recordname = '@'
             else:
-                recordname = octal_replace(recordname.rstrip('.'))
+                recordname = octal_replace(recordname)
             rdataset = vpc_zone.find_rdataset(recordname, rdtype=str(record['Type']), create=True)
             for value in record['ResourceRecords']:
                 rdata = dns.rdata.from_text(1, rdataset.rdtype, value['Value'].replace(domain_name + '.', ''))
