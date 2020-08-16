@@ -87,7 +87,6 @@ def update_resource_record(zone_id, host_name, hosted_zone_name, rectype, change
         except BaseException as e:
             log.error('Unable to update zone %s: %s' % (hosted_zone_name, e))
             raise
-        return True
 
 
 # Perform a diff against the two zones and return difference set
@@ -195,7 +194,7 @@ def lambda_handler(event, context):
     # Setup configuration based on JSON formatted event data
     try:
         domain_name = event['Domain']
-        master_ip = event['MasterDns']
+        primary_ip = event['MasterDns']
         route53_zone_id = event['ZoneId']
         if event['IgnoreTTL'] == 'True':
             ignore_ttl = True  # Ignore TTL changes in records
@@ -214,19 +213,19 @@ def lambda_handler(event, context):
         raise
 
     # Transfer the master zone file from the DNS server via AXFR
-    log.info('Transferring zone %s from server %s ' % (domain_name, master_ip))
+    log.info('Transferring zone %s from server %s ' % (domain_name, primary_ip))
     try:
-        master_zone = dns.zone.from_xfr(dns.query.xfr(
-            master_ip, 
+        primary_zone = dns.zone.from_xfr(dns.query.xfr(
+            primary_ip, 
             domain_name, 
             keyring = keyring,
             keyalgorithm = keyalgo,
             ))
     except BaseException as e:
-        log.error('Unable to retrieve zone %s from %s: %s' % (domain_name, master_ip, e))
+        log.error('Unable to retrieve zone %s from %s: %s' % (domain_name, primary_ip, e))
         raise
 
-    soa = master_zone.get_rdataset('@', 'SOA')
+    soa = primary_zone.get_rdataset('@', 'SOA')
     serial = soa[0].serial  # What's the current zone version on-prem
 
     # Read the zone from Route 53 via API and populate into zone object
@@ -256,7 +255,7 @@ def lambda_handler(event, context):
     vpc_serial = vpc_soa[0].serial
     if not (vpc_serial > serial):
         log.info('Comparing SOA serial %s with %s ' % (vpc_serial, serial))
-        differences = diff_zones(vpc_zone, master_zone, ignore_ttl)
+        differences = diff_zones(vpc_zone, primary_zone, ignore_ttl)
 
         for host, rdtype, record, ttl, action in differences:
             if rdtype != dns.rdatatype.SOA:
