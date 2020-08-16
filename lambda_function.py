@@ -27,11 +27,12 @@ from dns.rdataclass import *
 from dns.rdatatype import *
 
 # libraries that are available on Lambda
+import boto3
+import json
 import logging
 import os
 import re
 import sys
-import boto3
 
 # setup the boto3 client to talk to AWS APIs
 route53 = boto3.client('route53')
@@ -189,6 +190,36 @@ def get_all_records(zone_id):
     return rrsets
 
 
+def get_tsig_key(event):
+    keyring = None
+    keyalgorithm = None
+    if ('keyName' in event) & ('keySecret' in event):
+        keyring = dns.tsigkeyring.from_text({ event['keyName']: event['keySecret']})
+    if 'keyAlgorithm' in event:
+        keyalgorithm = event['keyAlgorithm']
+    if 'keySecretName' in event:
+        log.info('Requesting TSIG key from Secrets Manager')
+        client = boto3.client('secretsmanager')
+        try:
+            response = client.get_secret_value(
+                SecretId = event['keySecretName']
+                )
+        except ClientError as e:
+            log.error('Error retrieving TSIG secret from Secrets Manager: %s', e)
+            raise e
+        else:
+            if 'SecretString' in response:
+                secret = response['SecretString']
+            else:
+                secret = base64.b64decode(response['SecretBinary'])
+        # log.info('Secret from SM: %s', secret)
+        key = json.loads(secret)
+        # log.info('Key: %s', key)
+        keyring = dns.tsigkeyring.from_text({ key['name']: key['secret']})
+        keyalgorithm = key['algorithm']
+    return keyring, keyalgorithm
+
+
 # Main Handler for lambda function
 def lambda_handler(event, context):
     # Setup configuration based on JSON formatted event data
@@ -201,12 +232,7 @@ def lambda_handler(event, context):
         else:
             ignore_ttl = False  # Update records even if the change is just the TTL
 
-        keyring = None
-        keyalgo = None
-        if ('KeyName' in event) & ('KeySecret' in event):
-            keyring = dns.tsigkeyring.from_text({ event['KeyName']: event['KeySecret']})
-        if ('KeyAlgorithm' in event):
-            keyalgo = event['KeyAlgorithm']
+        keyring, keyalgorithm = get_tsig_key(event)
     except BaseException as e:
         log.error('Error in setting up the environment: %s' % e)
         log.error('Check JSON file is complete: %s', event)
@@ -219,7 +245,7 @@ def lambda_handler(event, context):
             primary_ip, 
             domain_name, 
             keyring = keyring,
-            keyalgorithm = keyalgo,
+            keyalgorithm = keyalgorithm,
             ))
     except BaseException as e:
         log.error('Unable to retrieve zone %s from %s: %s' % (domain_name, primary_ip, e))
