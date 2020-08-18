@@ -78,7 +78,7 @@ def update_resource_record(zone_id, host_name, hosted_zone_name, rectype, change
             ]
         }
         for value in changerec:  # Build the recordset
-            if (rectype != 'CNAME' and rectype != 'SRV' and rectype != 'MX' and rectype!= 'NS') or (str(value)[-1] == '.'):
+            if (rectype != 'CNAME' and rectype != 'SRV' and rectype != 'MX' and rectype!= 'NS') or (str(value)[-1] == '.') or (str(value)[-1] == '@'):
                 dns_changes['Changes'][0]['ResourceRecordSet']['ResourceRecords'].append({'Value': str(value)})
             else:
                 dns_changes['Changes'][0]['ResourceRecordSet']['ResourceRecords'].append({'Value': str(value) + '.' + hosted_zone_name + '.'})
@@ -212,9 +212,7 @@ def get_tsig_key(event):
                 secret = response['SecretString']
             else:
                 secret = base64.b64decode(response['SecretBinary'])
-        # log.info('Secret from SM: %s', secret)
         key = json.loads(secret)
-        # log.info('Key: %s', key)
         keyring = dns.tsigkeyring.from_text({ key['name']: key['secret']})
         keyalgorithm = key['algorithm']
     return keyring, keyalgorithm
