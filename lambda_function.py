@@ -193,16 +193,12 @@ def get_all_records(zone_id):
 def get_tsig_key(event):
     keyring = None
     keyalgorithm = None
-    if ('keyName' in event) & ('keySecret' in event):
-        keyring = dns.tsigkeyring.from_text({ event['keyName']: event['keySecret']})
-    if 'keyAlgorithm' in event:
-        keyalgorithm = event['keyAlgorithm']
-    if 'keySecretName' in event:
+    if 'key_secret_id' in event:
         log.info('Requesting TSIG key from Secrets Manager')
         client = boto3.client('secretsmanager')
         try:
             response = client.get_secret_value(
-                SecretId = event['keySecretName']
+                SecretId = event['key_secret_id']
                 )
         except ClientError as e:
             log.error('Error retrieving TSIG secret from Secrets Manager: %s', e)
@@ -215,6 +211,10 @@ def get_tsig_key(event):
         key = json.loads(secret)
         keyring = dns.tsigkeyring.from_text({ key['name']: key['secret']})
         keyalgorithm = key['algorithm']
+    if ('key_name' in event) & ('key_secret' in event):
+        keyring = dns.tsigkeyring.from_text({ event['key_name']: event['key_secret']})
+    if 'key_algorithm' in event:
+        keyalgorithm = event['key_algorithm']
     return keyring, keyalgorithm
 
 
@@ -222,14 +222,11 @@ def get_tsig_key(event):
 def lambda_handler(event, context):
     # Setup configuration based on JSON formatted event data
     try:
-        domain_name = event['Domain']
-        primary_ip = event['MasterDns']
-        route53_zone_id = event['ZoneId']
-        if event['IgnoreTTL'] == 'True':
-            ignore_ttl = True  # Ignore TTL changes in records
-        else:
-            ignore_ttl = False  # Update records even if the change is just the TTL
-
+        domain_name = event['domain_name'] if 'domain_name' in event else event['Domain']
+        primary_ip = event['primary_dns'] if 'primary_dns' in event else event['MasterDns']
+        route53_zone_id = event['zone_id'] if 'zone_id' in event else event['ZoneId']
+        ignore_ttl = ('ignore_ttl' in event) and (event['ignore_ttl'] == 'true')
+        ignore_records = event['ignore_records'] if 'ignore_records' in event else []
         keyring, keyalgorithm = get_tsig_key(event)
     except BaseException as e:
         log.error('Error in setting up the environment: %s' % e)
@@ -282,6 +279,9 @@ def lambda_handler(event, context):
         differences = diff_zones(vpc_zone, primary_zone, ignore_ttl)
 
         for host, rdtype, record, ttl, action in differences:
+            if (host + '.' + domain_name) in ignore_records:
+                log.info('Ignoring changes to %s (type %s)' % (host, rdtype))
+                continue
             if rdtype != dns.rdatatype.SOA:
                 update_resource_record(route53_zone_id, host, domain_name, lookup_rdtype.recmap(rdtype), record, ttl,
                                        action)
